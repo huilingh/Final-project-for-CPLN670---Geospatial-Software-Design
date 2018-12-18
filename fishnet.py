@@ -1,5 +1,5 @@
 """
-THIS SCRIPT
+THIS SCRIPT CREATE A FISHNET OF THE STUDY REGION
 
 To create an ArcToolbox tool with which to execute this script, do the following.
 1   In  ArcMap > Catalog > Toolboxes > My Toolboxes, either select an existing toolbox
@@ -10,9 +10,9 @@ To create an ArcToolbox tool with which to execute this script, do the following
 5   In a new dialog box, browse to the .py file to be invoked by this tool, and press Next.
 6   In the next dialog box, specify the following inputs (using dropdown menus wherever possible)
     before pressing OK or Finish.
-        DISPLAY NAME        DATA TYPE       PROPERTY>DIRECTION>VALUE    DEFAULT   
-        Input Grid          Raster Layer    Input  
-        Output Grid         Raster Dataset  Output  
+        DISPLAY NAME            DATA TYPE               PROPERTY>DIRECTION>VALUE    DEFAULT   
+        Input study region      Feature Layer           Input  
+        Output                  RFeature Class          Output  
     
    To later revise any of this, right-click to the tool's name and select Properties.
 """
