@@ -1,0 +1,407 @@
+// import features
+// Boundary of the study area
+var boundary = ee.FeatureCollection('ft:1Lxv4frwdPPBHYv9mJ_FSwaPUzEHgh4xxw6sakUVO'); 
+Map.centerObject(boundary, 8);
+Map.addLayer(boundary, {color: '990099'}, 'Study Area')
+
+
+// Railways
+var rail = ee.FeatureCollection('ft:1M6J0GtaZomf3yDxz48gyCZk3sa7GQLSLk6KmYV_X'); 
+Map.addLayer(rail, {color: '990000'}, 'rail');
+
+
+// import images
+// MODIS Land Cover (2001-2016) in 2015
+var land = ee.ImageCollection('MODIS/006/MCD12Q1').select(['LC_Type4']).filterDate('2015-01-01', '2015-12-31');
+// Compute the mean value in 2015
+var land15 = land.reduce(ee.Reducer.mean()).clip(boundary);
+Map.addLayer(land15, {min:0, max:8, opacity:0.8, palette:['1c0dff','05450a','086a10','54a708','78d203','009900','b6ff05','f9ffa4','a5a5a5']}, 'MODIS Land Type (2015)')
+
+// ALOS global DSM
+var DSM = ee.Image('JAXA/ALOS/AW3D30_V1_1').select(['AVE']).clip(boundary);
+Map.addLayer(DSM, {min:-479, max:500}, 'ALOS DSM')
+// calculate the slope based on the ALOS global DSM data
+var slope = ee.Terrain.slope(DSM)
+Map.addLayer(slope, {min:0, max:5}, 'ALOS Slope')
+
+// MODIS Vegetation (2000-2016) in 2015
+// tree coverage
+var tree = ee.ImageCollection('MODIS/051/MOD44B').select(['Percent_Tree_Cover']).filterDate('2015-01-01', '2015-12-31');
+// Compute the mean value in 2015
+var tree15 = tree.reduce(ee.Reducer.mean()).clip(boundary);
+Map.addLayer(tree15, {opacity:0.8}, 'Tree Coverage in 2015')
+
+// MODIS non-tree vegetation coverage in 2015
+var vege = ee.ImageCollection('MODIS/051/MOD44B').select(['Percent_NonTree_Vegetation']).filterDate('2015-01-01', '2015-12-31');
+// Compute the mean value in 2015
+var vege15 = vege.reduce(ee.Reducer.mean()).clip(boundary);
+Map.addLayer(vege15, {opacity:0.8}, 'Non-Tree Coverage in 2015')
+
+// GHSL population grid in 2015
+var GHSLpop15 = ee.Image('JRC/GHSL/P2016/POP_GPW_GLOBE_V1/2015').clip(boundary)
+Map.addLayer(GHSLpop15, {opacity:0.8}, 'Population in 2015')
+// GHSL population grid in 2000
+var GHSLpop00 = ee.Image('JRC/GHSL/P2016/POP_GPW_GLOBE_V1/2000').clip(boundary)
+Map.addLayer(GHSLpop00, {opacity:0.8}, 'Population in 2000')
+
+
+// the function to identify water body from MODIS land cover data; water will be reassigned to value 1, and the other types will be value 0
+var remap_water = function(oldmap){
+  var newmap = oldmap.remap([0], [1], 0, 'LC_Type4_mean')
+  return newmap
+} 
+var water = remap_water(land15)
+Map.addLayer(water, {min:0, max:1, opacity: 0.5, palette:['000000','0000ff']}, 'Water Body')
+
+
+// generate the decision factors for FUI
+
+// DF1: Population changes
+var popChange = GHSLpop15.subtract(GHSLpop00)
+Map.addLayer(popChange, {min:-5000, max:5000}, 'Population Change')
+print(popChange)
+
+// generate a histogram of population change and see the distribution
+var histPop = ui.Chart.image.histogram(popChange, boundary, 50)
+print(histPop)
+
+// reclassify population change
+var reclassify_Pop = function(oldmap){
+  var first = oldmap.lte(-128);
+  var second = oldmap.lte(0).and(oldmap.gt(-128));
+  var third = oldmap.lte(128).and(oldmap.gt(0));
+  var four = oldmap.gte(128);
+  
+  var reclass1 = first.remap([1],[1],0)
+  var reclass2 = second.remap([1],[2],0);
+  var reclass3 = third.remap([1],[3],0);
+  var reclass4 = four.remap([1],[4],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassPop = reclassify_Pop(popChange);
+Map.addLayer(reclassPop, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed population change')
+
+// DF2: Distance to existing urban lands in 2015
+// the function to identify the urban and built-up lands from MODIS land cover; urban lands will be reassigned to value 1, and the other types will be value 0
+var remap_urban = function(oldmap){
+  var newmap = oldmap.remap([8], [1], 0, 'LC_Type4_mean')
+  return newmap
+} 
+var urban15 = remap_urban(land15)
+Map.addLayer(urban15, {min:0, max:1, opacity:0.7}, 'Urban 2015')
+print(urban15)
+
+// euclident distance to urban land in 2015
+var disUrban = urban15.distance(ee.Kernel.euclidean(50000, 'meters'))
+Map.addLayer(disUrban, {min:0, max:5000, opacity:0.7}, 'Distance to Urban')
+
+// generate a histogram of distance to urban land and see the distribution
+var histUrban = ui.Chart.image.histogram(disUrban, boundary, 500)
+print(histUrban)
+
+// reclassify distance to urban land
+var reclassify_Urb = function(oldmap){
+  var first = oldmap.lte(0);
+  var second = oldmap.lte(2000).and(oldmap.gt(0));
+  var third = oldmap.lte(5000).and(oldmap.gt(2000));
+  var four = oldmap.gte(5000);
+  
+  var reclass1 = first.remap([1],[4],0)
+  var reclass2 = second.remap([1],[3],0);
+  var reclass3 = third.remap([1],[2],0);
+  var reclass4 = four.remap([1],[1],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassUrb = reclassify_Urb(disUrban);
+Map.addLayer(reclassUrb, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed distance to urban')
+
+// DF3: Distance to railroads
+// distance to railroads
+var disTrans = rail.distance(100000).clip(boundary)
+Map.addLayer(disTrans, {min:0, max:20000, opacity:0.7, palette:['ff0000','ffff00']}, 'Distance to Rail')
+print(disTrans)
+
+// generate a histogram of distance to railroads and see the distribution
+var histTrans = ui.Chart.image.histogram(disTrans, boundary, 500)
+print(histTrans)
+
+// reclassify distance to railroads
+var reclassify_Trans = function(oldmap){
+  var first = oldmap.lte(1000);
+  var second = oldmap.lte(5000).and(oldmap.gt(1000));
+  var third = oldmap.lte(10000).and(oldmap.gt(5000));
+  var four = oldmap.gte(10000);
+  
+  var reclass1 = first.remap([1],[4],0)
+  var reclass2 = second.remap([1],[3],0);
+  var reclass3 = third.remap([1],[2],0);
+  var reclass4 = four.remap([1],[1],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassTrans = reclassify_Trans(disTrans);
+Map.addLayer(reclassTrans, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed distance to rail')
+
+// DF4: Slope (lower slopes)
+// generate a histogram of slope and see the distribution
+var histSlope = ui.Chart.image.histogram(slope, boundary, 500)
+print(histSlope)
+
+// the slope image will be reclassified into two new images:
+// the first reclassification of slope is for the decision factor of FUI: 
+// slope with lower values will be reassigned to higher value, indicating that urban growth is more likely to occur on lower slopes areas
+var reclassify_Slope1 = function(oldmap){
+  var first = oldmap.lte(0.25);
+  var second = oldmap.lte(1).and(oldmap.gt(0.25));
+  var third = oldmap.lte(3).and(oldmap.gt(1));
+  var four = oldmap.gte(3);
+  
+  var reclass1 = first.remap([1],[4],0)
+  var reclass2 = second.remap([1],[3],0);
+  var reclass3 = third.remap([1],[2],0);
+  var reclass4 = four.remap([1],[1],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassSlope1 = reclassify_Slope1(slope);
+Map.addLayer(reclassSlope1, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed slope (FUI)')
+
+// calculate FUI giving weights to the decision factors
+var FUI = reclassPop.multiply(0.3).add(reclassUrb.multiply(0.3)).add(reclassTrans.multiply(0.2)).add(reclassSlope1.multiply(0.2))
+Map.addLayer(FUI, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'FUI')
+
+
+// generate the decision factors for ESI
+
+// DF1: Distance to water body
+// euclident distance to water body in 2015
+var disWater = water.distance(ee.Kernel.euclidean(70000, 'meters'))
+Map.addLayer(disWater, {min:0, max:10000, opacity:1}, 'Distance to Water')
+
+// generate a histogram of distance to water and see the distribution
+var histWater = ui.Chart.image.histogram(disWater, boundary, 800)
+print(histWater)
+
+// reclassify distance to water
+var reclassify_Water = function(oldmap){
+  var first = oldmap.lte(1000);
+  var second = oldmap.lte(5000).and(oldmap.gt(1000));
+  var third = oldmap.lte(10000).and(oldmap.gt(5000));
+  var four = oldmap.gte(10000);
+  
+  var reclass1 = first.remap([1],[4],0)
+  var reclass2 = second.remap([1],[3],0);
+  var reclass3 = third.remap([1],[2],0);
+  var reclass4 = four.remap([1],[1],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassWater = reclassify_Water(disWater);
+Map.addLayer(reclassWater, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed distance to water')
+
+// DF2: Elevation
+// generate a histogram of DSM elevation and see the distribution
+var histDSM = ui.Chart.image.histogram(DSM, boundary, 800)
+print(histDSM)
+
+// reclassify elevation
+var reclassify_DSM = function(oldmap){
+  var first = oldmap.lte(0);
+  var second = oldmap.lte(16).and(oldmap.gt(0));
+  var third = oldmap.lte(72).and(oldmap.gt(16));
+  var four = oldmap.gte(72);
+  
+  var reclass1 = first.remap([1],[4],0)
+  var reclass2 = second.remap([1],[3],0);
+  var reclass3 = third.remap([1],[2],0);
+  var reclass4 = four.remap([1],[1],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassDSM = reclassify_DSM(DSM);
+Map.addLayer(reclassDSM, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed elevation')
+
+// DF3: Slope (higher slopes)
+// the second reclassification of slope is for the decision factor of ESI: 
+// slope with higher values will be reassigned to higher value, indicating that higher slopes areas are more environmentally sensitive
+// (the second reclassification is the reverse of the first one)
+var reclassify_Slope2 = function(oldmap){
+  var first = oldmap.lte(0.25);
+  var second = oldmap.lte(1).and(oldmap.gt(0.25));
+  var third = oldmap.lte(3).and(oldmap.gt(1));
+  var four = oldmap.gte(3);
+  
+  var reclass1 = first.remap([1],[1],0)
+  var reclass2 = second.remap([1],[2],0);
+  var reclass3 = third.remap([1],[3],0);
+  var reclass4 = four.remap([1],[4],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassSlope2 = reclassify_Slope2(slope);
+Map.addLayer(reclassSlope2, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed slope (ESI)')
+
+// DF4: Tree coverage
+// generate a histogram of tree coverage percentage and see the distribution
+var histTree = ui.Chart.image.histogram(tree15, boundary, 500)
+print(histTree)
+
+// reclassify tree coverage
+var reclassify_Tree = function(oldmap){
+  var first = oldmap.lte(10);
+  var second = oldmap.lte(20).and(oldmap.gt(10));
+  var third = oldmap.lte(50).and(oldmap.gt(20));
+  var four = oldmap.gte(50);
+  
+  var reclass1 = first.remap([1],[1],0)
+  var reclass2 = second.remap([1],[2],0);
+  var reclass3 = third.remap([1],[3],0);
+  var reclass4 = four.remap([1],[4],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassTree = reclassify_Tree(tree15);
+Map.addLayer(reclassTree, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed tree coverage')
+
+// DF5: Non-tree vegetation coverage
+// generate a histogram of non-tree vegetation coverage percentage and see the distribution
+var histVege = ui.Chart.image.histogram(vege15, boundary, 500)
+print(histVege)
+
+// reclassify non-tree vegetation coverage
+var reclassify_Vege = function(oldmap){
+  var first = oldmap.lte(40);
+  var second = oldmap.lte(50).and(oldmap.gt(40));
+  var third = oldmap.lte(60).and(oldmap.gt(50));
+  var four = oldmap.gte(60);
+  
+  var reclass1 = first.remap([1],[1],0)
+  var reclass2 = second.remap([1],[2],0);
+  var reclass3 = third.remap([1],[3],0);
+  var reclass4 = four.remap([1],[4],0);
+  
+  var reclass = reclass1.add(reclass2).add(reclass3).add(reclass4);
+  return reclass;
+}
+
+var reclassVege = reclassify_Vege(vege15);
+Map.addLayer(reclassVege, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'Reclassed non-tree vegetation')
+
+// calculate ESI giving weights to the decision factors
+var ESI = reclassWater.multiply(0.2).add(reclassDSM.multiply(0.2)).add(reclassSlope2.multiply(0.3)).add(reclassTree.multiply(0.2)).add(reclassVege.multiply(0.1));
+Map.addLayer(ESI, {min:1, max:4, palette:['ff0000','00ff00','0000ff','ffff00']}, 'ESI')
+
+
+// combine FUI and ESI
+var COMB = FUI.multiply(ESI)
+
+// create a mask to hide existing urban land
+var maskUrban = urban15.neq(1)
+Map.addLayer(urban15, {min:0, max:1, palette:['ffffff','000000'], opacity:0.7}, 'Urban 2015')
+Map.addLayer(COMB.mask(maskUrban), {min:1, max:9, palette:['0000ff','00ff00','ffff00','ff0000'], opacity:0.7}, 'Combined FUI/ESI')
+
+
+
+/*
+// data preparation for ArcPy
+
+// geometry for exporting images
+var geometry = ee.Geometry.Rectangle([112.191483,21.732163,114.942642,23.992319]);
+
+// FUI:
+// DV: Nightlight Change from NOAA (2000-2013)
+// Nighlight in 2013
+var light1 = ee.ImageCollection('NOAA/DMSP-OLS/NIGHTTIME_LIGHTS').select(['stable_lights']).filterDate('2013-01-01', '2013-12-31');
+// Compute the mean value in 2013
+var light13 = light1.reduce(ee.Reducer.mean()).clip(geometry);
+
+// Nightlight in 2000
+var light2 = ee.ImageCollection('NOAA/DMSP-OLS/NIGHTTIME_LIGHTS').select(['stable_lights']).filterDate('2000-01-01', '2000-12-31');
+// Compute the mean value in 2000
+var light00 = light2.reduce(ee.Reducer.mean()).clip(geometry);
+
+var lightChange = light13.subtract(light00)
+
+// Predictor 1: population change (2000-2015)
+// GHSL population grid in 2015
+var GHSLpop15 = ee.Image('JRC/GHSL/P2016/POP_GPW_GLOBE_V1/2015').clip(geometry)
+// GHSL population grid in 2005
+var GHSLpop00 = ee.Image('JRC/GHSL/P2016/POP_GPW_GLOBE_V1/2000').clip(geometry)
+
+var popChange = GHSLpop15.subtract(GHSLpop00)
+
+
+// Predictor 2: distance to existing urban land in 2005
+// var disUrban05 = urban05.distance(ee.Kernel.euclidean(50000, 'meters'))
+
+// Predictor 3: distance to railroad
+// var disTrans = rail.distance(100000).clip(geometry)
+
+// Predictor 4: slope
+// ALOS global DSM
+var DSM = ee.Image('JAXA/ALOS/AW3D30_V1_1').select(['AVE']).clip(geometry);
+//Map.addLayer(DSM, {min:-479, max:500}, 'ALOS DSM')
+// calculate the slope based on the ALOS global DSM data
+var slope = ee.Terrain.slope(DSM)
+//Map.addLayer(slope, {min:0, max:5}, 'ALOS Slope')
+
+
+
+// ESI:
+// DV: ALOS Topographic diversity
+// ALOS Topographic Diversity
+var Topo = ee.Image('CSP/ERGo/1_0/Global/ALOS_topoDiversity').clip(geometry)
+
+// Predictor 1: distance to water body
+var land = ee.ImageCollection('MODIS/006/MCD12Q1').select(['LC_Type4']).filterDate('2015-01-01', '2015-12-31');
+var land15 = land.reduce(ee.Reducer.mean()).clip(geometry);
+var remap_water = function(oldmap){
+  var newmap = oldmap.remap([0], [1], 0, 'LC_Type4_mean')
+  return newmap
+} 
+var water = remap_water(land15)
+var disWater = water.distance(ee.Kernel.euclidean(50000, 'meters'))
+
+// Predictor 2: elevation
+var DSM = ee.Image('JAXA/ALOS/AW3D30_V1_1').select(['AVE']).clip(geometry);
+
+// Predictor 3: slope
+// above
+
+// Predictor 4: tree coverage in 2015
+var tree = ee.ImageCollection('MODIS/051/MOD44B').select(['Percent_Tree_Cover']).filterDate('2015-01-01', '2015-12-31');
+var tree15 = tree.reduce(ee.Reducer.mean()).clip(geometry);
+
+// Predictor 5: non-tree vegetation coverage in 2015
+var vege = ee.ImageCollection('MODIS/051/MOD44B').select(['Percent_NonTree_Vegetation']).filterDate('2015-01-01', '2015-12-31');
+var vege15 = vege.reduce(ee.Reducer.mean()).clip(geometry);
+
+// export images as tif
+Export.image.toDrive({
+  image: vege15,
+  description: 'Vegetation02',
+  scale: 500,
+  crs: 'EPSG:4326',
+  region: geometry,
+  maxPixels: 10000000000
+});
+
+*/
