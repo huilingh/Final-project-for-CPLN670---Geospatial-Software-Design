@@ -1,6 +1,6 @@
 ## Final Project for course CPLN 670: 
 # Identifying Future Urban Growth and Environmental Sensitivity
-The full reort and all codes are in this reop:
+The full reort and all codes are in this repo:
 - [Full report](../blob/master/Final%20Report.pdf)
 - [Google Earth Engine code (in JavaScript)](../blob/master/Google%20EE%20code)
 - [ArcPy scripts](../blob/master/arcpy_script)
